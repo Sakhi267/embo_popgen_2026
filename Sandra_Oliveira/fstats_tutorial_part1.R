@@ -37,8 +37,7 @@ library(ggplot2)
 library(maps)
 #
 # Set a working directory within your home directory
-setwd("~/test/")
-
+data_dir <-"/disk/home/kundu/embo_popgen_2026/Sandra_Oliveira"
 
 # --- 0.2  Data provenance ---
 #
@@ -87,6 +86,14 @@ info_file  <- "info_embo_1240k.txt"                 # metadata (one row per indi
 prefix     <- "v62.0_1240k_public_embosubset"       # EIGENSTRAT prefix (.geno/.snp/.ind)
 f2_dir     <- "f2data_1240k"                        # will store f2 blocks
 
+# Metadata file
+info_file <- file.path(data_dir, "info_embo_1240k.txt")
+
+# EIGENSTRAT genotype-file prefix
+prefix <- file.path(data_dir, "v62.0_1240k_public_embosubset")
+
+# Output folder for f2 blocks
+f2_dir <- file.path(data_dir, "f2data_1240k")
 
 ################################################################################
 # PART 1: EXPLORING THE DATASET
@@ -222,6 +229,8 @@ lang_df
 # PART 2: F2 STATISTIC AND FST — GENETIC DIVERGENCE
 ################################################################################
 #
+# f tool measures the drift bet two pop
+
 # f2(A, B) estimates the genetic drift that has accumulated between populations
 # A and B since they diverged from their common ancestor. Briefly, it is the
 # expected squared allele frequency difference. The actual estimator implemented
@@ -239,13 +248,14 @@ lang_df
 
 # By default maxmix is set to 0. Since we have ancient samples with substantial 
 # missingness, in order not to lose too many SNPs, we allow 10% of missingness
-extract_f2(prefix, f2_dir, maxmiss = 0.1)
+extract_f2(prefix, f2_dir, maxmiss = 0.1) 
+#maxmiss = 0.1= allow a maximum of 10% missing data in the SNPs
 
 # read in f2 blocks
 # use afprod=TRUE to compute allele frequency products in addition to f2.
 # This option will handle negative f2-statistic across blocks (useful if
 # there are too many missing or rare SNPs in populations with low sample size)
-f2_blocks <- f2_from_precomp(f2_dir, afprod = T)
+f2_blocks <- f2_from_precomp(f2_dir, afprod = T) #afprod= only use when have missing data
 
 dim(f2_blocks)
 # The resulting object is a 3D array with f2-statistics for each population pair:
@@ -402,6 +412,7 @@ ggplot(stats_df, aes(x=f2, y=fst)) +
 # --- 3.1  Pairwise outgroup f3 heatmap (modern + ancient populations) ---
 
 outgroup_f3_all <- f3(f2_blocks, pop1 = outgroup, pop2 = all_pops, pop3 = all_pops)
+#the first pop we put in the function is always the outgroup, dont mess up the order
 # We use Chimp as outgroup for all modern and archaic humans.
 # Note that pop1 should always be the outgroup. This may not be the case outside
 # ADMIXTOOLS v2 (e.g. admixr package)
@@ -508,6 +519,12 @@ neand_f3 <- f3(f2_blocks_strict,
                pop1 = "French", pop2 = "Altai_Neanderthal", pop3 = "Mbuti")
 neand_f3
 
+#if there is admixture= f3 should be -ve
+#if we don't get -ve even if admixture is there, we don't have power to detect admixture
+#cuz f3 is affecetd by drift
+
+#need to do f4 or D statistics
+
 # A non-significant result does NOT rule out admixture — the f3 test simply
 # lacks power at this scale. Common reasons for lack of power include a low 
 # admixture proportion and genetic drift since admixture. This test is most
@@ -526,11 +543,14 @@ neand_f3
 # A significantly non-zero value signals that the tree topology is inadequate
 # (i.e. gene flow has occurred).
 #
+#here D is outgroup
+
 # f4(A, B; C, D) > 0  →  A and C share more alleles than B and C
 #                         equivalently: B and D share more alleles than A and D
+#                         admixture between A & C
 # f4(A, B; C, D) < 0  →  B and C share more alleles than A and C
 #                         equivalently: A and D share more alleles than B and D
-#
+#                         admixture between B & C
 # Symmetry: f4(A, B; C, D) = −f4(B, A; C, D) = −f4(A, B; D, C)
 #
 # Neanderthal and Denisovan introgression are well-documented cases of
@@ -646,3 +666,38 @@ par(mar=c(5, 4, 4, 2))
 #   - Petr et al. (2019) PNAS
 #   - ADMIXTOOLS v2 documentation
 ################################################################################
+
+## f4 exercise
+################################################################################
+# F4 TEST: COMPARE Khomani WITH BIAKA AND MBUTI
+################################################################################
+#
+# This tests:
+#   f4(Chimp, Khomani; Biaka, Mbuti)
+#
+# Question:
+# Does French share more genetic drift with Biaka or with Mbuti?
+#
+# Interpretation:
+#   f4 approximately 0  -> French is equally related to Biaka and Mbuti
+#   |z| > 3             -> significant difference in allele sharing
+################################################################################
+
+
+
+f2_blocks_strict <- f2_from_geno(prefix, maxmiss = 0,
+                                 pops = c(outgroup,
+                                          "Khomani", "Biaka", "Mbuti"))
+
+
+# --- Compute f4 statistic ---
+
+biaka_mbuti_f4 <- f4(f2_blocks_strict, maxmiss = 0,
+                     pop1 = outgroup,
+                     pop2 = "Khomani",
+                     pop3 = "Mbuti",
+                     pop4 = "Biaka")
+
+biaka_mbuti_f4$sig <- abs(biaka_mbuti_f4$z) > 3
+
+biaka_mbuti_f4
