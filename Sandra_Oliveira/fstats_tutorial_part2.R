@@ -21,7 +21,17 @@ library(admixtools)
 library(ggplot2)
 
 # Set a working directory within your home directory
-setwd("~/test/")
+data_dir <-"/disk/home/kundu/embo_popgen_2026/Sandra_Oliveira"
+
+# Metadata file
+info_file <- file.path(data_dir, "info_embo_1240k.txt")
+
+# EIGENSTRAT genotype-file prefix
+prefix <- file.path(data_dir, "v62.0_1240k_public_embosubset")
+
+# Output folder for f2 blocks
+f2_dir <- file.path(data_dir, "f2data_1240k")
+
 
 # File paths used throughout this tutorial
 info_file  <- "info_embo_1240k.txt"                 # metadata (one row per individual)
@@ -71,9 +81,12 @@ results <- lapply(0:4, function(n) {
   print(p)
   list(winner = winner, qpg = qpg)
 })
+#the score closer to zero is the best score
+# worst score= z-score= it should also decrease= we take |z|<3
 
 # Questions: What is the minimum number of admixture events required to obtain a 
 # graph with the worst residuals (Z scores) below 3 in your results?
+## as soon as we get z < 3, better to stop= simpler model better
 # Does the score improve substantially for higher number of admixture events?
 
 
@@ -116,6 +129,10 @@ candidates <- lapply(1:n_runs, function(i) {
        igraph = edges_to_igraph(winner$edges[[1]]),
        score  = winner$score)
 })
+
+#numbers on the graph = units of drift
+# 0/very small value= not much differentiation bet 2 pop= lower variation
+#Can use other methods like ABC/fastsimcola2 to verify the effect of drift
 
 # Questions: Are the scores of the winner graphs similar? Are the graphs 
 # converging to similar solutions?
@@ -313,7 +330,37 @@ qpadm_results <- lapply(seq_len(nrow(good_pairs)), function(i) {
 # robustness of the graphs. Alternatively, select a modern population and 
 # try to describe it as a 1-wave or multiple-wave mixture of other populations.
 
+n_runs <- 5
 
+# Select the testing groups
+pops = c("Chimp", "Lemande", "South_Africa_2000BP", "Ethiopia_4500BP", 
+         "Cameroon_3100-7800BP", "Malawi_2500-16000BP", "Morocco_14000BP")
+
+# Compute f2 for the subset needed
+f2_blocks_strict <- f2_from_geno(prefix, pops = pops)
+
+# Let's find graphs for 0 to 4 admixture events
+results <- lapply(0:4, function(n) {
+  
+  # Run find_graphs
+  g <- find_graphs(f2_blocks_strict, numadmix = n, outpop = "Chimp")
+  
+  # Get winner (lowest score) for each numadmix
+  winner <- g[which.min(g$score), ]
+  
+  # Run the original qpGraph function to obtain the worst residual
+  qpg <- qpgraph(f2_blocks_strict,
+                 edges_to_igraph(winner$edges[[1]]),
+                 return_fstats = TRUE)
+  
+  # Plot winning graph
+  p <- plot_graph(winner$edges[[1]], textsize = 4, fix = TRUE) +
+    ggtitle(paste("numadmix =", n, "| score =", round(winner$score, 4),
+                  "| worst residual =", round(qpg$worst_residual, 2)))
+  print(p)
+  
+  list(winner = winner, qpg = qpg)
+})
 ################################################################################
 # END OF TUTORIAL
 #
@@ -326,4 +373,3 @@ qpadm_results <- lapply(seq_len(nrow(good_pairs)), function(i) {
 #     SNP ascertainment schemes
 #   - ADMIXTOOLS v2 documentation
 ################################################################################
-
