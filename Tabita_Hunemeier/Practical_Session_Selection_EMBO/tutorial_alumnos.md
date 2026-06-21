@@ -65,7 +65,203 @@ Write the R code necessary to perform the following:
 
 **Write your R code here:**
 ```R
-# 
+# ============================================================
+# Part 1: Human Genomic Diversity and Natural Selection
+# Pairwise FST analysis around EDAR
+# Working directory: .../Practical_Session_Selection_EMBO/input
+# ============================================================
+
+# Install packages once if needed:
+# install.packages(c("dplyr", "readr", "ggplot2", "tidyr"))
+
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(tidyr)
+
+# Candidate EDAR SNP: rs3827760
+edar_pos <- 109513601
+
+# ------------------------------------------------------------
+# 1. Read the pairwise FST files
+# ------------------------------------------------------------
+
+afr_eas <- read_tsv(
+  "Part_1_HumanDiversity/AFR_EAS.weir.fst",
+  show_col_types = FALSE
+)
+
+afr_eur <- read_tsv(
+  "Part_1_HumanDiversity/AFR_EUR.weir.fst",
+  show_col_types = FALSE
+)
+
+eas_eur <- read_tsv(
+  "Part_1_HumanDiversity/EAS_EUR.weir.fst",
+  show_col_types = FALSE
+)
+
+# Check columns. The expected FST column is WEIR_AND_COCKERHAM_FST
+colnames(afr_eas)
+head(afr_eas)
+head(afr_eur)
+head(eas_eur)
+# ------------------------------------------------------------
+# 2. Remove duplicated positions and missing FST values
+#    Set negative FST values to zero
+# ------------------------------------------------------------
+
+afr_eas_clean <- afr_eas %>%
+  distinct(CHROM, POS, .keep_all = TRUE) %>%
+  filter(!is.na(WEIR_AND_COCKERHAM_FST)) %>%
+  mutate(FST_AFR_EAS = pmax(WEIR_AND_COCKERHAM_FST, 0)) %>%
+  select(CHROM, POS, FST_AFR_EAS)
+
+afr_eur_clean <- afr_eur %>%
+  distinct(CHROM, POS, .keep_all = TRUE) %>%
+  filter(!is.na(WEIR_AND_COCKERHAM_FST)) %>%
+  mutate(FST_AFR_EUR = pmax(WEIR_AND_COCKERHAM_FST, 0)) %>%
+  select(CHROM, POS, FST_AFR_EUR)
+
+eas_eur_clean <- eas_eur %>%
+  distinct(CHROM, POS, .keep_all = TRUE) %>%
+  filter(!is.na(WEIR_AND_COCKERHAM_FST)) %>%
+  mutate(FST_EAS_EUR = pmax(WEIR_AND_COCKERHAM_FST, 0)) %>%
+  select(CHROM, POS, FST_EAS_EUR)
+
+# ------------------------------------------------------------
+# 3. Keep only SNP positions present in all three comparisons
+# ------------------------------------------------------------
+
+fst_merged <- afr_eas_clean %>%
+  inner_join(afr_eur_clean, by = c("CHROM", "POS")) %>%
+  inner_join(eas_eur_clean, by = c("CHROM", "POS"))
+
+# Number of shared SNPs
+nrow(fst_merged)
+
+# ------------------------------------------------------------
+# 4. Extract FST values for EDAR SNP rs3827760
+# ------------------------------------------------------------
+
+edar_fst <- fst_merged %>%
+  filter(POS == edar_pos)
+
+edar_fst
+
+# If this returns zero rows, check nearby positions:
+fst_merged %>%
+  filter(POS >= edar_pos - 5, POS <= edar_pos + 5)
+
+# ------------------------------------------------------------
+# 5. Calculate FST distribution quantiles
+# ------------------------------------------------------------
+
+fst_quantiles <- fst_merged %>%
+  summarise(
+    AFR_EAS_Q50 = quantile(FST_AFR_EAS, 0.50),
+    AFR_EAS_Q90 = quantile(FST_AFR_EAS, 0.90),
+    AFR_EAS_Q95 = quantile(FST_AFR_EAS, 0.95),
+    AFR_EAS_Q99 = quantile(FST_AFR_EAS, 0.99),
+
+    AFR_EUR_Q50 = quantile(FST_AFR_EUR, 0.50),
+    AFR_EUR_Q90 = quantile(FST_AFR_EUR, 0.90),
+    AFR_EUR_Q95 = quantile(FST_AFR_EUR, 0.95),
+    AFR_EUR_Q99 = quantile(FST_AFR_EUR, 0.99),
+
+    EAS_EUR_Q50 = quantile(FST_EAS_EUR, 0.50),
+    EAS_EUR_Q90 = quantile(FST_EAS_EUR, 0.90),
+    EAS_EUR_Q95 = quantile(FST_EAS_EUR, 0.95),
+    EAS_EUR_Q99 = quantile(FST_EAS_EUR, 0.99)
+  )
+
+fst_quantiles
+
+# A clearer quantile table: 50%, 90%, 95%, 99%, 99.9%
+quantile_table <- data.frame(
+  Quantile = c("50%", "90%", "95%", "99%", "99.9%"),
+  AFR_EAS = quantile(
+    fst_merged$FST_AFR_EAS,
+    probs = c(0.50, 0.90, 0.95, 0.99, 0.999)
+  ),
+  AFR_EUR = quantile(
+    fst_merged$FST_AFR_EUR,
+    probs = c(0.50, 0.90, 0.95, 0.99, 0.999)
+  ),
+  EAS_EUR = quantile(
+    fst_merged$FST_EAS_EUR,
+    probs = c(0.50, 0.90, 0.95, 0.99, 0.999)
+  )
+)
+
+quantile_table
+
+# ------------------------------------------------------------
+# 6. Calculate percentile rank of EDAR SNP
+# ------------------------------------------------------------
+
+edar_percentiles <- data.frame(
+  Comparison = c("AFR vs EAS", "AFR vs EUR", "EAS vs EUR"),
+  EDAR_FST = c(
+    edar_fst$FST_AFR_EAS,
+    edar_fst$FST_AFR_EUR,
+    edar_fst$FST_EAS_EUR
+  ),
+  Percentile = c(
+    mean(fst_merged$FST_AFR_EAS <= edar_fst$FST_AFR_EAS) * 100,
+    mean(fst_merged$FST_AFR_EUR <= edar_fst$FST_AFR_EUR) * 100,
+    mean(fst_merged$FST_EAS_EUR <= edar_fst$FST_EAS_EUR) * 100
+  )
+)
+
+edar_percentiles
+
+# ------------------------------------------------------------
+# 7. Plot pairwise FST in a 10 kb window around EDAR
+# ------------------------------------------------------------
+
+window_size <- 10000
+
+fst_window <- fst_merged %>%
+  filter(
+    POS >= edar_pos - window_size,
+    POS <= edar_pos + window_size
+  )
+
+fst_long <- fst_window %>%
+  pivot_longer(
+    cols = c(FST_AFR_EAS, FST_AFR_EUR, FST_EAS_EUR),
+    names_to = "Comparison",
+    values_to = "FST"
+  ) %>%
+  mutate(
+    Comparison = recode(
+      Comparison,
+      FST_AFR_EAS = "AFR vs EAS",
+      FST_AFR_EUR = "AFR vs EUR",
+      FST_EAS_EUR = "EAS vs EUR"
+    )
+  )
+
+ggplot(fst_long, aes(x = POS, y = FST)) +
+  geom_point(alpha = 0.7, size = 1.5) +
+  geom_vline(
+    xintercept = edar_pos,
+    linetype = "dashed",
+    linewidth = 0.8
+  ) +
+  facet_wrap(~ Comparison, scales = "free_y") +
+  labs(
+    title = "Pairwise FST around the EDAR locus",
+    subtitle = "10 kb window around rs3827760 (chr2:109,513,601)",
+    x = "Genomic position on chromosome 2",
+    y = "Weir and Cockerham FST"
+  ) +
+  theme_classic() +
+  theme(
+    axis.line.y = element_line(linewidth = 0.8),
+    axis.title = element_text(face = "bold")
+  )
 
 
 ```
@@ -83,6 +279,116 @@ Write the R code necessary to:
 **Write your R code here:**
 ```R
 # 
+# ============================================================
+# Population Branch Statistic (PBS) for East Asians
+# ============================================================
+
+# PBS transforms FST into branch lengths:
+# T = -log(1 - FST)
+#
+# PBS_EAS = (T_AFR_EAS + T_EAS_EUR - T_AFR_EUR) / 2
+
+# Avoid log(0) if any FST value is exactly 1
+# Values extremely close to 1 are capped slightly below 1
+fst_merged_pbs <- fst_merged %>%
+  mutate(
+    FST_AFR_EAS_safe = pmin(FST_AFR_EAS, 0.999999),
+    FST_AFR_EUR_safe = pmin(FST_AFR_EUR, 0.999999),
+    FST_EAS_EUR_safe = pmin(FST_EAS_EUR, 0.999999),
+
+    T_AFR_EAS = -log(1 - FST_AFR_EAS_safe),
+    T_AFR_EUR = -log(1 - FST_AFR_EUR_safe),
+    T_EAS_EUR = -log(1 - FST_EAS_EUR_safe),
+
+    PBS_EAS_raw = (T_AFR_EAS + T_EAS_EUR - T_AFR_EUR) / 2,
+
+    # Set negative estimated branch lengths to zero
+    PBS_EAS = pmax(PBS_EAS_raw, 0)
+  )
+
+# View the new PBS columns
+head(fst_merged_pbs)
+
+# ------------------------------------------------------------
+# 1. PBS value at the EDAR candidate SNP rs3827760
+# ------------------------------------------------------------
+
+edar_pbs <- fst_merged_pbs %>%
+  filter(POS == edar_pos) %>%
+  select(
+    CHROM, POS,
+    FST_AFR_EAS, FST_AFR_EUR, FST_EAS_EUR,
+    T_AFR_EAS, T_AFR_EUR, T_EAS_EUR,
+    PBS_EAS_raw, PBS_EAS
+  )
+
+edar_pbs
+
+print(edar_pbs, width = Inf)
+# ------------------------------------------------------------
+# 2. PBS distribution quantiles
+# ------------------------------------------------------------
+
+pbs_quantiles <- quantile(
+  fst_merged_pbs$PBS_EAS,
+  probs = c(0.50, 0.90, 0.95, 0.99, 0.999),
+  na.rm = TRUE
+)
+
+pbs_quantiles
+
+# Make the quantiles easier to read
+pbs_quantile_table <- data.frame(
+  Quantile = c("50%", "90%", "95%", "99%", "99.9%"),
+  PBS_EAS = as.numeric(pbs_quantiles)
+)
+
+pbs_quantile_table
+
+# ------------------------------------------------------------
+# 3. Percentile rank of EDAR PBS value
+# ------------------------------------------------------------
+
+edar_pbs_percentile <- mean(
+  fst_merged_pbs$PBS_EAS <= edar_pbs$PBS_EAS
+) * 100
+
+edar_pbs_percentile
+
+# ------------------------------------------------------------
+# 4. Plot PBS_EAS in a 10 kb window around rs3827760
+# ------------------------------------------------------------
+
+window_size <- 10000
+
+pbs_window <- fst_merged_pbs %>%
+  filter(
+    POS >= edar_pos - window_size,
+    POS <= edar_pos + window_size
+  )
+
+ggplot(pbs_window, aes(x = POS, y = PBS_EAS)) +
+  geom_point(alpha = 0.7, size = 1.7) +
+  geom_vline(
+    xintercept = edar_pos,
+    linetype = "dashed",
+    linewidth = 0.8
+  ) +
+  geom_point(
+    data = pbs_window %>% filter(POS == edar_pos),
+    size = 3
+  ) +
+  labs(
+    title = "PBS for East Asians around the EDAR locus",
+    subtitle = "10 kb window around rs3827760 (chr2:109,513,601)",
+    x = "Genomic position on chromosome 2",
+    y = "PBS_EAS"
+  ) +
+  theme_classic() +
+  theme(
+    axis.line.y = element_line(linewidth = 0.8),
+    axis.title = element_text(face = "bold")
+  )
 
 
 ```
@@ -116,7 +422,53 @@ Write the R code necessary to:
 **Write your R code here:**
 ```R
 # 
+# ============================================================
+# Part 1: Human Diversity
+# EHH decay and furcation trees around EDAR rs3827760
+# ============================================================
 
+# Install once if needed:
+# install.packages("rehh")
+
+library(rehh)
+
+# Candidate EDAR SNP
+edar_pos <- 109513601
+
+# ------------------------------------------------------------
+# 1. Convert the phased VCF files into rehh haplohh objects
+# ------------------------------------------------------------
+
+# LWK = African population
+haplohh_afr <- data2haplohh(
+  hap_file = "Part_1_HumanDiversity/Chr2_EDAR_LWK_500K.recode.vcf",
+  haplotype.in.columns = FALSE,
+  polarize_vcf = FALSE,
+  verbose = TRUE
+)
+
+# CHS = East Asian population
+haplohh_eas <- data2haplohh(
+  hap_file = "Part_1_HumanDiversity/Chr2_EDAR_CHS_500K.recode.vcf",
+  haplotype.in.columns = FALSE,
+  polarize_vcf = FALSE,
+  verbose = TRUE
+)
+
+
+# 2. Find the marker name at the EDAR position
+# Marker name
+edar_marker <- "rs3827760"
+
+# 3. Calculate EHH
+ehh_afr <- calc_ehh(haplohh_afr, mrk = edar_marker)
+ehh_eas <- calc_ehh(haplohh_eas, mrk = edar_marker)
+# 3. Calculate EHH
+ehh_afr <- calc_ehh(haplohh_afr, mrk = edar_marker)
+ehh_eas <- calc_ehh(haplohh_eas, mrk = edar_marker)
+
+plot(ehh_afr, main = "AFR")
+plot(ehh_eas, main = "EAS")
 
 ```
 
@@ -131,8 +483,287 @@ Write the R code necessary to:
 5. Estimate cross-population XP-EHH between EAS and AFR using `ies2xpehh()`, calculate window-based averages, and plot them.
 
 **Write your R code here:**
-```R
-# 
+```r
+# iHS and XP-EHH analysis
+
+library(rehh)
+library(dplyr)
+library(ggplot2)
+
+# focal SNP
+edar_marker <- "rs3827760"
+
+# ------------------------------------------------------------
+# 1. Genome-wide EHH scan
+# ------------------------------------------------------------
+
+scan_afr <- scan_hh(haplohh_afr)
+scan_eas <- scan_hh(haplohh_eas)
+
+# ------------------------------------------------------------
+# 2. Calculate iHS
+# ------------------------------------------------------------
+
+ihs_afr <- ihh2ihs(scan_afr)
+ihs_eas <- ihh2ihs(scan_eas)
+
+# ------------------------------------------------------------
+# 3. iHS at rs3827760 and single-site plot in EAS
+# ------------------------------------------------------------
+
+ihs_eas[ihs_eas$MARKER == edar_marker, ]
+
+plot(
+  ihs_eas$POSITION,
+  ihs_eas$IHS,
+  pch = 16,
+  cex = 0.5,
+  xlab = "Position on chromosome 2",
+  ylab = "iHS",
+  main = "iHS scan in EAS"
+)
+
+abline(v = 109513601, lty = 2)
+
+####################################
+# ------------------------------------------------------------
+# iHS and XP-EHH analysis around EDAR
+# ------------------------------------------------------------
+
+library(rehh)
+library(dplyr)
+library(ggplot2)
+
+edar_marker <- "rs3827760"
+edar_pos <- 109513601
+
+# ------------------------------------------------------------
+# 1. Genome-wide EHH scan
+# ------------------------------------------------------------
+
+scan_afr <- scan_hh(haplohh_afr)
+scan_eas <- scan_hh(haplohh_eas)
+
+# ------------------------------------------------------------
+# 2. Calculate iHS
+# ------------------------------------------------------------
+
+ihs_afr <- ihh2ihs(scan_afr)
+ihs_eas <- ihh2ihs(scan_eas)
+
+# Extract the actual iHS tables
+ihs_afr_table <- ihs_afr$ihs
+ihs_eas_table <- ihs_eas$ihs
+
+# Check column names
+colnames(ihs_afr_table)
+colnames(ihs_eas_table)
+
+# ------------------------------------------------------------
+# 3. iHS at rs3827760 and iHS plot in EAS
+# ------------------------------------------------------------
+
+# iHS value at EDAR
+ihs_eas_table[ihs_eas_table$MARKER == edar_marker, ]
+
+# Plot iHS across the EAS region
+plot(
+  ihs_eas_table$POSITION,
+  ihs_eas_table$IHS,
+  pch = 16,
+  cex = 0.5,
+  xlab = "Position on chromosome 2",
+  ylab = "iHS",
+  main = "iHS scan in EAS"
+)
+
+abline(v = edar_pos, lty = 2)
+
+# ------------------------------------------------------------
+# 4. Average absolute iHS in sliding windows
+#    50 SNPs per window, step = 40 SNPs
+# ------------------------------------------------------------
+
+window_ihs <- function(ihs_df, window_size = 50, step = 40) {
+  
+  ihs_df <- ihs_df %>%
+    filter(!is.na(IHS)) %>%
+    arrange(POSITION)
+  
+  starts <- seq(
+    1,
+    nrow(ihs_df) - window_size + 1,
+    by = step
+  )
+  
+  bind_rows(lapply(starts, function(i) {
+    
+    x <- ihs_df[i:(i + window_size - 1), ]
+    
+    data.frame(
+      MID_POS = mean(x$POSITION),
+      MEAN_ABS_IHS = mean(abs(x$IHS))
+    )
+  }))
+}
+
+window_ihs_afr <- window_ihs(ihs_afr_table)
+window_ihs_eas <- window_ihs(ihs_eas_table)
+
+# Plot windowed mean absolute iHS in EAS
+ggplot(window_ihs_eas, aes(x = MID_POS / 1e6, y = MEAN_ABS_IHS)) +
+  geom_line() +
+  geom_vline(xintercept = edar_pos / 1e6, linetype = "dashed") +
+  labs(
+    title = "Windowed mean absolute iHS: EAS",
+    x = "Position on chromosome 2 (Mb)",
+    y = "Mean |iHS|"
+  ) +
+  theme_classic()
+
+# ------------------------------------------------------------
+# 5. XP-EHH: EAS compared with AFR
+# ------------------------------------------------------------
+
+xpehh_eas_afr <- ies2xpehh(
+  scan_eas,
+  scan_afr
+)
+
+
+# ------------------------------------------------------------
+# 5. XP-EHH: EAS compared with AFR
+# ------------------------------------------------------------
+
+xpehh_eas_afr <- ies2xpehh(scan_eas, scan_afr)
+
+# In this rehh version, the result is already a data frame
+xpehh_table <- xpehh_eas_afr
+
+# XP-EHH at EDAR
+xpehh_table[xpehh_table$POSITION == edar_pos, ]
+
+# ------------------------------------------------------------
+# 6. Sliding-window average XP-EHH
+# ------------------------------------------------------------
+
+window_xpehh <- function(xpehh_df, window_size = 50, step = 40) {
+  
+  xpehh_df <- xpehh_df %>%
+    filter(!is.na(XPEHH)) %>%
+    arrange(POSITION)
+  
+  starts <- seq(
+    1,
+    nrow(xpehh_df) - window_size + 1,
+    by = step
+  )
+  
+  bind_rows(lapply(starts, function(i) {
+    
+    x <- xpehh_df[i:(i + window_size - 1), ]
+    
+    data.frame(
+      MID_POS = mean(x$POSITION),
+      MEAN_XPEHH = mean(x$XPEHH)
+    )
+  }))
+}
+
+window_xpehh_eas_afr <- window_xpehh(xpehh_table)
+
+ggplot(window_xpehh_eas_afr, aes(x = MID_POS / 1e6, y = MEAN_XPEHH)) +
+  geom_line() +
+  geom_vline(xintercept = edar_pos / 1e6, linetype = "dashed") +
+  labs(
+    title = "Windowed XP-EHH: EAS vs AFR",
+    x = "Position on chromosome 2 (Mb)",
+    y = "Mean XP-EHH"
+  ) +
+  theme_classic()
+####################################
+# ------------------------------------------------------------
+# 4. Average absolute iHS in sliding windows
+#    50 SNPs per window, step = 40 SNPs
+# ------------------------------------------------------------
+
+window_ihs <- function(ihs_df, window_size = 50, step = 40) {
+  
+  ihs_df <- ihs_df %>%
+    filter(!is.na(IHS)) %>%
+    arrange(POSITION)
+  
+  starts <- seq(1, nrow(ihs_df) - window_size + 1, by = step)
+  
+  bind_rows(lapply(starts, function(i) {
+    
+    x <- ihs_df[i:(i + window_size - 1), ]
+    
+    data.frame(
+      MID_POS = mean(x$POSITION),
+      MEAN_ABS_IHS = mean(abs(x$IHS))
+    )
+  }))
+}
+
+window_ihs_afr <- window_ihs(ihs_afr)
+window_ihs_eas <- window_ihs(ihs_eas)
+
+# Plot windowed iHS for EAS
+ggplot(window_ihs_eas, aes(x = MID_POS / 1e6, y = MEAN_ABS_IHS)) +
+  geom_line() +
+  geom_vline(xintercept = 109513601 / 1e6, linetype = "dashed") +
+  labs(
+    title = "Windowed mean absolute iHS: EAS",
+    x = "Position on chromosome 2 (Mb)",
+    y = "Mean |iHS|"
+  ) +
+  theme_classic()
+
+# ------------------------------------------------------------
+# 5. XP-EHH: EAS compared with AFR
+# ------------------------------------------------------------
+
+xpehh_eas_afr <- ies2xpehh(
+  scan_eas,
+  scan_afr
+)
+
+# Check XP-EHH at EDAR
+xpehh_eas_afr[xpehh_eas_afr$MARKER == edar_marker, ]
+
+# Function for sliding-window XP-EHH
+window_xpehh <- function(xpehh_df, window_size = 50, step = 40) {
+  
+  xpehh_df <- xpehh_df %>%
+    filter(!is.na(XPEHH)) %>%
+    arrange(POSITION)
+  
+  starts <- seq(1, nrow(xpehh_df) - window_size + 1, by = step)
+  
+  bind_rows(lapply(starts, function(i) {
+    
+    x <- xpehh_df[i:(i + window_size - 1), ]
+    
+    data.frame(
+      MID_POS = mean(x$POSITION),
+      MEAN_XPEHH = mean(x$XPEHH)
+    )
+  }))
+}
+
+window_xpehh_eas_afr <- window_xpehh(xpehh_eas_afr)
+
+# Plot windowed XP-EHH
+ggplot(window_xpehh_eas_afr, aes(x = MID_POS / 1e6, y = MEAN_XPEHH)) +
+  geom_line() +
+  geom_vline(xintercept = 109513601 / 1e6, linetype = "dashed") +
+  labs(
+    title = "Windowed XP-EHH: EAS vs AFR",
+    x = "Position on chromosome 2 (Mb)",
+    y = "Mean XP-EHH"
+  ) +
+  theme_classic()
 
 
 ```
@@ -166,9 +797,111 @@ Write the R code necessary to:
 5. Check PBS value at rs3827760, check quantiles, and plot the PBS scan.
 
 **Write your R code here:**
-```R
-# 
+```r
 
+library(dplyr)
+library(readr)
+library(ggplot2)
+
+edar_pos <- 109513601
+
+# Read FST files
+nam_eas <- read_tsv(
+  "Part_1_HumanDiversity/Chr2_NAM_EAS.weir.fst",
+  show_col_types = FALSE
+)
+
+nam_eur <- read_tsv(
+  "Part_1_HumanDiversity/Chr2_NAM_EUR.weir.fst",
+  show_col_types = FALSE
+)
+
+eur_eas <- read_tsv(
+  "Part_1_HumanDiversity/Chr2_EUR_EAS.weir.fst",
+  show_col_types = FALSE
+)
+
+# Keep one row per position, remove NA, rename FST column
+clean_fst <- function(df, new_name) {
+  df %>%
+    distinct(POS, .keep_all = TRUE) %>%
+    filter(!is.na(WEIR_AND_COCKERHAM_FST)) %>%
+    select(CHROM, POS, FST = WEIR_AND_COCKERHAM_FST) %>%
+    rename(!!new_name := FST)
+}
+
+nam_eas_clean <- clean_fst(nam_eas, "FST_NAM_EAS")
+nam_eur_clean <- clean_fst(nam_eur, "FST_NAM_EUR")
+eur_eas_clean <- clean_fst(eur_eas, "FST_EUR_EAS")
+
+# Align SNPs present in all three comparisons
+pbs_nam <- nam_eas_clean %>%
+  inner_join(nam_eur_clean, by = c("CHROM", "POS")) %>%
+  inner_join(eur_eas_clean, by = c("CHROM", "POS")) %>%
+  mutate(
+    # Negative FST values are set to zero
+    FST_NAM_EAS = pmax(FST_NAM_EAS, 0),
+    FST_NAM_EUR = pmax(FST_NAM_EUR, 0),
+    FST_EUR_EAS = pmax(FST_EUR_EAS, 0),
+
+    # Prevent log(0) if an FST value equals 1
+    FST_NAM_EAS_safe = pmin(FST_NAM_EAS, 0.999999),
+    FST_NAM_EUR_safe = pmin(FST_NAM_EUR, 0.999999),
+    FST_EUR_EAS_safe = pmin(FST_EUR_EAS, 0.999999),
+
+    # Transform FST values into distances
+    T_NAM_EAS = -log(1 - FST_NAM_EAS_safe),
+    T_NAM_EUR = -log(1 - FST_NAM_EUR_safe),
+    T_EUR_EAS = -log(1 - FST_EUR_EAS_safe),
+
+    # PBS for Native Americans
+    PBS_NAM_raw = (T_NAM_EAS + T_NAM_EUR - T_EUR_EAS) / 2,
+
+    # Negative branch lengths are not biologically meaningful
+    PBS_NAM = pmax(PBS_NAM_raw, 0)
+  )
+
+# PBS value at EDAR rs3827760
+edar_pbs_nam <- pbs_nam %>%
+  filter(POS == edar_pos)
+
+edar_pbs_nam
+
+# Distribution quantiles
+pbs_nam_quantiles <- quantile(
+  pbs_nam$PBS_NAM,
+  probs = c(0.50, 0.90, 0.95, 0.99, 0.999),
+  na.rm = TRUE
+)
+
+pbs_nam_quantiles
+
+# Percentile of EDAR PBS among all SNPs
+edar_pbs_percentile <- mean(
+  pbs_nam$PBS_NAM <= edar_pbs_nam$PBS_NAM
+) * 100
+
+edar_pbs_percentile
+
+# Plot PBS around EDAR: 10 kb window
+pbs_nam_window <- pbs_nam %>%
+  filter(
+    POS >= edar_pos - 10000,
+    POS <= edar_pos + 10000
+  )
+
+ggplot(pbs_nam_window, aes(x = POS / 1e6, y = PBS_NAM)) +
+  geom_point(size = 1.5, alpha = 0.7) +
+  geom_vline(
+    xintercept = edar_pos / 1e6,
+    linetype = "dashed"
+  ) +
+  labs(
+    title = "PBS scan around EDAR in Native Americans",
+    x = "Position on chromosome 2 (Mb)",
+    y = "PBS_NAM"
+  ) +
+  theme_classic()
 
 ```
 
@@ -253,7 +986,136 @@ Write the R code necessary to:
 **Write your R code here:**
 ```R
 # 
+# ============================================================
+# Part 2: Canid Diversity
+# PCA visualization: small vs large dog breeds
+# Working directory:
+# .../Practical_Session_Selection_EMBO/input
+# ============================================================
 
+library(dplyr)
+library(readr)
+library(ggplot2)
+
+# ------------------------------------------------------------
+# 1. Load PLINK PCA eigenvectors and eigenvalues
+# ------------------------------------------------------------
+
+# PLINK .eigenvec format:
+# Column 1 = FID
+# Column 2 = IID
+# Remaining columns = PCs
+
+eigenvec <- read.table(
+  "Part_2_CanidDiversity/plink_pca.eigenvec",
+  header = FALSE,
+  stringsAsFactors = FALSE
+)
+
+# Give columns meaningful names
+colnames(eigenvec) <- c(
+  "FID",
+  "IID",
+  paste0("PC", seq_len(ncol(eigenvec) - 2))
+)
+
+# PLINK .eigenval format:
+# one eigenvalue per row
+eigenval <- scan(
+  "Part_2_CanidDiversity/plink_pca.eigenval",
+  what = numeric()
+)
+
+# Check files
+head(eigenvec)
+head(eigenval)
+
+# ------------------------------------------------------------
+# 2. Calculate variance explained by PC1 and PC2
+# ------------------------------------------------------------
+
+variance_explained <- eigenval / sum(eigenval) * 100
+
+pc_variance <- data.frame(
+  PC = paste0("PC", seq_along(variance_explained)),
+  Variance_explained_percent = variance_explained
+)
+
+pc_variance[1:2, ]
+
+pc1_percent <- round(variance_explained[1], 2)
+pc2_percent <- round(variance_explained[2], 2)
+
+# ------------------------------------------------------------
+# 3–5. Load metadata and merge with PCA coordinates
+# ------------------------------------------------------------
+
+sample_info <- read.table(
+  "Part_2_CanidDiversity/sample_info.txt",
+  header = TRUE,
+  sep = "\t",
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+# Rename using the actual metadata columns
+sample_info_clean <- sample_info %>%
+  transmute(
+    IID = sampleName,
+    Size_group = group,
+    Breed = breed
+  )
+
+# Check IDs in the PCA file before merging
+head(eigenvec[, c("FID", "IID")])
+head(sample_info_clean)
+
+# Merge using IID because sample_info has no FID column
+pca_data <- eigenvec %>%
+  left_join(sample_info_clean, by = "IID")
+
+# Check whether metadata matched
+table(is.na(pca_data$Breed))
+table(is.na(pca_data$Size_group))
+
+# Keep small and large dogs only for this PCA plot
+pca_plot_data <- pca_data %>%
+  filter(Size_group %in% c("small", "large")) %>%
+  mutate(
+    Size_group = factor(
+      Size_group,
+      levels = c("small", "large")
+    )
+  )
+
+# ------------------------------------------------------------
+# 6. Plot PC1 versus PC2
+# ------------------------------------------------------------
+
+ggplot(
+  pca_plot_data,
+  aes(
+    x = PC1,
+    y = PC2,
+    color = Breed,
+    shape = Size_group
+  )
+) +
+  geom_point(size = 3, alpha = 0.85) +
+  labs(
+    title = "PCA of Canid Genomic Variation",
+    subtitle = "Small and large dog breeds",
+    x = paste0("PC1 (", pc1_percent, "% variance explained)"),
+    y = paste0("PC2 (", pc2_percent, "% variance explained)"),
+    color = "Breed",
+    shape = "Size group"
+  ) +
+  theme_classic() +
+  theme(
+    axis.line = element_line(linewidth = 0.8),
+    axis.title = element_text(face = "bold"),
+    legend.title = element_text(face = "bold")
+  )
 
 ```
 
@@ -285,8 +1147,198 @@ Write the R script necessary to:
 **Write your R code here:**
 ```R
 # 
+# ============================================================
+# Part 2: PCAdapt outlier scan with LD clumping
+# Working directory:
+# .../Practical_Session_Selection_EMBO/input
+# ============================================================
 
+# Install once if needed:
+#install.packages("pcadapt")
 
+library(pcadapt)
+library(dplyr)
+library(ggplot2)
+
+# ------------------------------------------------------------
+# 1. Load the PLINK genotype data
+# ------------------------------------------------------------
+
+plink_prefix <- "Part_2_CanidDiversity/subset_chr15.bed"
+
+# Read the PLINK .bed/.bim/.fam dataset
+genotypes <- read.pcadapt(
+  input = plink_prefix,
+  type = "bed"
+)
+
+# ------------------------------------------------------------
+# 2. Run PCAdapt using K = 2 and LD clumping
+# ------------------------------------------------------------
+
+# LD clumping:
+# size = 500 SNPs per window
+# threshold = r^2 = 0.1
+#
+# LD clumping is performed before PCA so highly correlated SNPs
+# do not dominate the PCs.
+
+pcadapt_result <- pcadapt(
+  input = genotypes,
+  K = 2,
+  method = "componentwise",
+  min.maf = 0.05,
+  LD.clumping = list(
+    size = 500,
+    threshold = 0.1
+  )
+)
+
+# Inspect result
+pcadapt_result
+
+# ------------------------------------------------------------
+# 3. Extract p-values and merge with physical positions
+# ------------------------------------------------------------
+
+# Read the PLINK BIM file
+# Columns: chromosome, SNP ID, genetic distance, physical position, allele1, allele2
+bim <- read.table(
+  "Part_2_CanidDiversity/subset_chr15.bim",
+  header = FALSE,
+  stringsAsFactors = FALSE
+)
+
+colnames(bim) <- c(
+  "CHROM",
+  "SNP",
+  "GENETIC_DISTANCE",
+  "POS",
+  "ALLELE1",
+  "ALLELE2"
+)
+
+# Confirm that number of SNPs matches number of p-values
+nrow(bim)
+length(pcadapt_result$pvalues)
+
+# Create a data frame for plotting
+# Check the dimensions first
+dim(pcadapt_result$pvalues)
+
+# Combine the PC1 and PC2 p-values:
+# take the smallest p-value for each SNP
+pvalue_combined <- apply(
+  pcadapt_result$pvalues,
+  1,
+  min,
+  na.rm = TRUE
+)
+
+# Create plotting data frame
+pcadapt_df <- bim %>%
+  mutate(
+    pvalue = pvalue_combined,
+    POS_MB = POS / 1e6,
+    neg_log10_p = -log10(pvalue)
+  ) %>%
+  filter(!is.na(pvalue), pvalue > 0)
+
+# ------------------------------------------------------------
+# 4. Manhattan plot
+# ------------------------------------------------------------
+
+ggplot(pcadapt_df, aes(x = POS_MB, y = neg_log10_p)) +
+  geom_point(alpha = 0.65, size = 1.2) +
+  labs(
+    title = "PCAdapt genomic outlier scan: chromosome 15",
+    subtitle = "K = 2 PCs with LD clumping (500 SNP window, r² threshold = 0.1)",
+    x = "Physical position on chromosome 15 (Mb)",
+    y = expression(-log[10](p-value))
+  ) +
+  theme_classic() +
+  theme(
+    axis.line = element_line(linewidth = 0.8),
+    axis.title = element_text(face = "bold")
+  )
+  
+  
+#make the graph pretty
+
+# ------------------------------------------------------------
+# Highlight the IGF1 peak around 43.4 Mb
+# ------------------------------------------------------------
+
+# Define the IGF1 region to highlight
+igf1_center <- 43.4
+igf1_window <- 0.5   # highlights SNPs from 42.9 to 43.9 Mb
+
+pcadapt_df <- pcadapt_df %>%
+  mutate(
+    Region = ifelse(
+      POS_MB >= (igf1_center - igf1_window) &
+      POS_MB <= (igf1_center + igf1_window),
+      "IGF1 peak (43.4 Mb)",
+      "Other SNPs"
+    ),
+    Region = factor(
+      Region,
+      levels = c("Other SNPs", "IGF1 peak (43.4 Mb)")
+    )
+  )
+
+# ------------------------------------------------------------
+# Manhattan plot with IGF1 peak highlighted
+# ------------------------------------------------------------
+
+ggplot(pcadapt_df, aes(x = POS_MB, y = neg_log10_p, color = Region)) +
+  
+  geom_point(size = 1.2, alpha = 0.75) +
+  
+  geom_vline(
+    xintercept = igf1_center,
+    linetype = "dashed",
+    linewidth = 0.7
+  ) +
+  
+  scale_color_manual(
+    values = c(
+      "Other SNPs" = "grey40",
+      "IGF1 peak (43.4 Mb)" = "turquoise4"
+    )
+  ) +
+  
+  annotate(
+    "text",
+    x = igf1_center,
+    y = max(pcadapt_df$neg_log10_p, na.rm = TRUE) * 0.95,
+    label = "IGF1\n43.4 Mb",
+    fontface = "bold",
+    size = 4,
+    vjust = 1
+  ) +
+  
+  labs(
+    title = "PCAdapt Genomic Outlier Scan: Chromosome 15",
+    subtitle = "K = 2 PCs with LD clumping (500 SNP window, r² threshold = 0.1)",
+    x = "Physical position on chromosome 15 (Mb)",
+    y = expression(-log[10](p-value)),
+    color = NULL
+  ) +
+  
+  theme_classic() +
+  theme(
+    axis.line = element_line(linewidth = 0.8),
+    axis.title = element_text(face = "bold"),
+    legend.position = "top",
+    legend.direction = "horizontal",
+    legend.text = element_text(size = 11),
+    legend.background = element_rect(
+      fill = "white",
+      color = "black",
+      linewidth = 0.4
+    )
+  )
 ```
 
 ### Questions for Students
@@ -346,6 +1398,43 @@ bcftools view -S input/Part_2_CanidDiversity/large_dogs.txt -O z -o input/Part_2
 bcftools index input/Part_2_CanidDiversity/large_dogs_polarized.vcf.gz
 ```
 
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+
+# Read SNP-level normalized XP-nSL results
+xpnsl <- read_tsv(
+  "Part_2_CanidDiversity/xpnsl_phased.xpnsl.out.norm",
+  show_col_types = FALSE
+)
+
+# Prepare data
+xpnsl <- xpnsl %>%
+  mutate(
+    POS_MB = pos / 1e6,
+    Region = ifelse(
+      POS_MB >= 43.3 & POS_MB <= 43.5,
+      "IGF1 region",
+      "Other regions"
+    )
+  )
+
+# SNP-level XP-nSL plot
+ggplot(xpnsl, aes(x = POS_MB, y = norm_xpnsl, color = Region)) +
+  geom_point(size = 1, alpha = 0.7) +
+  geom_vline(xintercept = 43.4, linetype = "dashed") +
+  labs(
+    title = "XP-nSL scan: Small dogs vs Large dogs",
+    x = "Position on chromosome 15 (Mb)",
+    y = "Normalized XP-nSL",
+    color = NULL
+  ) +
+  theme_classic() +
+  theme(
+    legend.position = "top",
+    axis.title = element_text(face = "bold")
+  )
 ---
 
 ### Selection Scan Execution and Normalization
@@ -411,9 +1500,83 @@ Write the R code necessary to:
 4. Plot the Rsb Manhattan plot using `ggplot2`, highlighting the *IGF1* region between 41 Mb and 45.5 Mb in red.
 
 **Write your R code here:**
-```R
+```r
 # 
 
+
+
+library(rehh)
+library(dplyr)
+library(ggplot2)
+library(R.utils)
+
+# ------------------------------------------------------------
+# 1. Load polarized VCFs
+# ------------------------------------------------------------
+
+hap_small <- data2haplohh(
+  hap_file = "Part_2_CanidDiversity/small_dogs_polarized.vcf.gz",
+  haplotype.in.columns = FALSE,
+  polarize_vcf = FALSE
+)
+
+hap_large <- data2haplohh(
+  hap_file = "Part_2_CanidDiversity/large_dogs_polarized.vcf.gz",
+  haplotype.in.columns = FALSE,
+  polarize_vcf = FALSE
+)
+
+# ------------------------------------------------------------
+# 2. Haplotype homozygosity scans
+# ------------------------------------------------------------
+
+scan_small <- scan_hh(hap_small)
+scan_large <- scan_hh(hap_large)
+
+# ------------------------------------------------------------
+# 3. Rsb: small dogs compared with large dogs
+# ------------------------------------------------------------
+
+rsb <- ines2rsb(scan_small, scan_large)
+
+# In this rehh version, rsb is already a data frame
+head(rsb)
+colnames(rsb)
+
+# ------------------------------------------------------------
+# 4. Manhattan plot highlighting IGF1 region
+# ------------------------------------------------------------
+
+rsb_plot <- rsb %>%
+  filter(!is.na(RSB)) %>%
+  mutate(
+    POS_MB = POSITION / 1e6,
+    Region = ifelse(
+      POS_MB >= 41 & POS_MB <= 45.5,
+      "IGF1 region",
+      "Other regions"
+    )
+  )
+
+ggplot(rsb_plot, aes(x = POS_MB, y = RSB, color = Region)) +
+  geom_point(size = 1, alpha = 0.7) +
+  scale_color_manual(
+    values = c(
+      "Other regions" = "grey50",
+      "IGF1 region" = "red"
+    )
+  ) +
+  labs(
+    title = "Rsb scan: Small dogs vs Large dogs",
+    x = "Position on chromosome 15 (Mb)",
+    y = "Rsb",
+    color = NULL
+  ) +
+  theme_classic() +
+  theme(
+    legend.position = "top",
+    axis.title = element_text(face = "bold")
+  )
 
 ```
 
